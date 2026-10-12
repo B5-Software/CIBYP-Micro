@@ -1,6 +1,7 @@
 build/
 sdkconfig
 sdkconfig.old
+sdkconfig.ci
 managed_components/
 dependencies.lock
 *.journal

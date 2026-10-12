@@ -8,6 +8,8 @@
 #include "esp_crt_bundle.h"
 #include "esp_timer.h"
 #include "esp_system.h"
+#include "esp_random.h"
+#include "esp_idf_version.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "driver/gpio.h"
@@ -30,14 +32,22 @@ static QueueHandle_t jobs;
 static atomic_uint epoch;
 static unsigned active_job_epoch;
 static atomic_bool connected, faulted, pending_busy, needs_hello;
+static bool gpio_ready;
 static esp_websocket_client_handle_t websocket;
 static EventGroupHandle_t network;
+static esp_err_t setup_gpio(int pin) {
+  if (pin < 0) return ESP_OK;
+  if (!GPIO_IS_VALID_OUTPUT_GPIO(pin)) return ESP_ERR_INVALID_ARG;
+  esp_err_t error = gpio_set_level(pin, 0);
+  if (error != ESP_OK) return error;
+  return gpio_config(&(gpio_config_t){.pin_bit_mask = 1ULL << (unsigned)pin, .mode = GPIO_MODE_INPUT_OUTPUT, .pull_up_en = GPIO_PULLUP_DISABLE, .pull_down_en = GPIO_PULLDOWN_DISABLE, .intr_type = GPIO_INTR_DISABLE});
+}
 static int load(void *ctx, cm_journal *j) {(void)ctx; size_t bytes = sizeof *j; esp_err_t e = nvs_get_blob(storage, "journal", j, &bytes); return e == ESP_ERR_NVS_NOT_FOUND ? 0 : e != ESP_OK || bytes != sizeof *j;}
 static int store(void *ctx, const cm_journal *j) {(void)ctx; return nvs_set_blob(storage, "journal", j, sizeof *j) != ESP_OK || nvs_commit(storage) != ESP_OK;}
-static void low(void *ctx) {(void)ctx; if (CONFIG_CIBYP_GPIO >= 0) (void)gpio_set_level(CONFIG_CIBYP_GPIO, 0);}
-static int read_gpio(void *ctx, int *value) {(void)ctx; if (CONFIG_CIBYP_GPIO < 0) return -1; *value = gpio_get_level(CONFIG_CIBYP_GPIO); return 0;}
+static void low(void *ctx) {(void)ctx; if (gpio_ready) (void)gpio_set_level(CONFIG_CIBYP_GPIO, 0);}
+static int read_gpio(void *ctx, int *value) {(void)ctx; if (!gpio_ready) return -1; *value = gpio_get_level(CONFIG_CIBYP_GPIO); return 0;}
 static int write_gpio(void *ctx, int value, uint32_t ms) {
-  (void)ctx; if (!atomic_load(&connected) || active_job_epoch != atomic_load(&epoch) || CONFIG_CIBYP_GPIO < 0 || !GPIO_IS_VALID_OUTPUT_GPIO(CONFIG_CIBYP_GPIO)) return -1;
+  (void)ctx; if (!atomic_load(&connected) || active_job_epoch != atomic_load(&epoch) || !gpio_ready) return -1;
   (void)esp_timer_stop(fail_safe);
   if (value && esp_timer_start_once(fail_safe, (uint64_t)ms * 1000) != ESP_OK) return -1;
   int result = gpio_set_level(CONFIG_CIBYP_GPIO, value) == ESP_OK ? 0 : -1;
@@ -94,16 +104,20 @@ static void worker(void *ctx) {
     }
     if (atomic_load(&connected) && (xTaskGetTickCount() - telemetry_at) >= pdMS_TO_TICKS(30000)) {
       telemetry_at = xTaskGetTickCount();
-      int n = snprintf(outgoing, sizeof outgoing, "{\"type\":\"telemetry\",\"payload\":{\"freeHeap\":%lu,\"minimumFreeHeap\":%lu,\"workerStackWatermark\":%lu,\"restartReason\":%d,\"journalCapacity\":%d}}", (unsigned long)esp_get_free_heap_size(), (unsigned long)esp_get_minimum_free_heap_size(), (unsigned long)uxTaskGetStackHighWaterMark(NULL), (int)esp_reset_reason(), CM_OPERATIONS);
+      int n = snprintf(outgoing, sizeof outgoing, "{\"type\":\"telemetry\",\"payload\":{\"target\":\"%s\",\"freeHeap\":%lu,\"minimumFreeHeap\":%lu,\"workerStackWatermark\":%lu,\"restartReason\":%d,\"journalCapacity\":%d}}", CONFIG_IDF_TARGET, (unsigned long)esp_get_free_heap_size(), (unsigned long)esp_get_minimum_free_heap_size(), (unsigned long)uxTaskGetStackHighWaterMark(NULL), (int)esp_reset_reason(), CM_OPERATIONS);
       if (n > 0 && esp_websocket_client_send_text(websocket, outgoing, n, pdMS_TO_TICKS(2000)) != n) atomic_store(&faulted, true);
     }
   }
 }
 void app_main(void) {
+  printf("CIBYP Micro: %s, ESP-IDF %d.%d.%d, GPIO %d\n", CONFIG_IDF_TARGET, ESP_IDF_VERSION_MAJOR, ESP_IDF_VERSION_MINOR, ESP_IDF_VERSION_PATCH, CONFIG_CIBYP_GPIO);
   /* Never erase a failed NVS partition automatically: that could repeat writes. */
   ESP_ERROR_CHECK(nvs_flash_init()); ESP_ERROR_CHECK(nvs_open("cibyp", NVS_READWRITE, &storage));
   ESP_ERROR_CHECK(esp_timer_create(&(esp_timer_create_args_t){.callback = low, .name = "gpio-safe"}, &fail_safe));
-  if (CONFIG_CIBYP_GPIO >= 0) {if (!GPIO_IS_VALID_OUTPUT_GPIO(CONFIG_CIBYP_GPIO)) abort(); ESP_ERROR_CHECK(gpio_reset_pin(CONFIG_CIBYP_GPIO)); ESP_ERROR_CHECK(gpio_set_direction(CONFIG_CIBYP_GPIO, GPIO_MODE_INPUT_OUTPUT)); low(NULL);}
+  esp_err_t gpio_error = setup_gpio(CONFIG_CIBYP_GPIO);
+  if (gpio_error != ESP_OK) {printf("CIBYP Micro: cannot configure GPIO %d on %s (%s); check this board's pinout\n", CONFIG_CIBYP_GPIO, CONFIG_IDF_TARGET, esp_err_to_name(gpio_error)); return;}
+  gpio_ready = CONFIG_CIBYP_GPIO >= 0;
+  low(NULL);
   if (strncmp(CONFIG_CIBYP_GATEWAY, "wss://", 6) || strlen(CONFIG_CIBYP_DEVICE_TOKEN) != 64 || !strlen(CONFIG_CIBYP_WIFI_SSID)) {printf("CIBYP Micro: configure Wi-Fi, TLS gateway and device credentials using idf.py menuconfig\n"); return;}
   char resource[40]; snprintf(resource, sizeof resource, "gpio:%d", CONFIG_CIBYP_GPIO);
   cm_platform platform = {NULL, load, store, read_gpio, write_gpio}; if (cm_init(&runtime, &platform, CONFIG_CIBYP_DEVICE_ID, resource)) {low(NULL); printf("CIBYP Micro: journal unavailable; writes disabled\n"); return;}

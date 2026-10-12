@@ -10,12 +10,21 @@ config CIBYP_GATEWAY
   default "wss://example.invalid/remote/v2/devices"
 config CIBYP_DEVICE_ID
   string "Provisioned device ID"
+  default "esp32c6-demo" if IDF_TARGET_ESP32C6
+  default "esp32s31-demo" if IDF_TARGET_ESP32S31
   default "esp32-demo"
 config CIBYP_DEVICE_TOKEN
   string "Provisioned device token (64 lowercase hex characters)"
   default ""
 config CIBYP_GPIO
   int "Explicitly granted output GPIO (-1 disables writes)"
+  range -1 30 if IDF_TARGET_ESP32C6
+  range -1 61 if IDF_TARGET_ESP32S31
   range -1 48
   default -1
+  help
+    Chip GPIO number, not the board's physical header number. Leave disabled
+    until the exact module pinout and gateway resource grant are configured.
+    GPIO29 and GPIO41 do not exist on S31. Flash/PSRAM, strapping, USB and
+    console pins must not be repurposed without a board-specific review.
 endmenu

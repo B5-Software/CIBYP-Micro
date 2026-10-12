@@ -22,21 +22,51 @@ jobs:
       - run: cmake --build build
       - run: ctest --test-dir build --output-on-failure
   esp32:
+    name: firmware (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: esp32s3
+            image: espressif/idf:v5.5.1
+            gpio: 17
+          - target: esp32c6
+            image: espressif/idf:v5.5.1
+            gpio: 23
+          - target: esp32s31
+            # Official master image, pinned so preview SDK changes cannot break a repeat build.
+            image: espressif/idf@sha256:6ad927cfb85a5fea82da64b00960b01adff4fc6019ffcdb18caa3da642d55343
+            gpio: 61
     runs-on: ubuntu-latest
-    container: espressif/idf:v5.5.1
+    container: ${{ matrix.image }}
     steps:
       - uses: actions/checkout@v4
-      - name: Build reference ESP32-S3 firmware
+      - name: Build target firmware with an enabled GPIO
         shell: bash
+        env:
+          CIBYP_BUILD_TARGET: ${{ matrix.target }}
+          CIBYP_BUILD_GPIO: ${{ matrix.gpio }}
         run: |
+          set -eo pipefail
           . /opt/esp/idf/export.sh
           cd ports/esp-idf
-          idf.py set-target esp32s3
-          idf.py build
+          printf 'CONFIG_CIBYP_GPIO=%s\n' "$CIBYP_BUILD_GPIO" > sdkconfig.ci
+          idf.py --preview -D 'SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.ci' set-target "$CIBYP_BUILD_TARGET"
+          idf.py --preview build size
+          # Also compile the disabled default; published development artifacts never drive a pin.
+          sed -i 's/^CONFIG_CIBYP_GPIO=.*/CONFIG_CIBYP_GPIO=-1/' sdkconfig
+          idf.py --preview build size
+          {
+            printf 'target=%s\ngpio=-1\ntested_gpio=%s\n' "$CIBYP_BUILD_TARGET" "$CIBYP_BUILD_GPIO"
+            idf.py --version
+            git -C "$IDF_PATH" rev-parse HEAD
+          } > build/cibyp-build-info.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: esp32s3-unsigned-development-firmware
+          name: ${{ matrix.target }}-unsigned-development-firmware
           path: |
             ports/esp-idf/build/*.bin
             ports/esp-idf/build/bootloader/bootloader.bin
             ports/esp-idf/build/partition_table/partition-table.bin
+            ports/esp-idf/build/flasher_args.json
+            ports/esp-idf/build/cibyp-build-info.txt

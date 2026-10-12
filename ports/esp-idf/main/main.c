@@ -12,6 +12,7 @@
 #include "esp_idf_version.h"
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "esp_partition.h"
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -112,6 +113,8 @@ static void worker(void *ctx) {
 void app_main(void) {
   printf("CIBYP Micro: %s, ESP-IDF %d.%d.%d, GPIO %d\n", CONFIG_IDF_TARGET, ESP_IDF_VERSION_MAJOR, ESP_IDF_VERSION_MINOR, ESP_IDF_VERSION_PATCH, CONFIG_CIBYP_GPIO);
   /* Never erase a failed NVS partition automatically: that could repeat writes. */
+  const esp_partition_t *journal_partition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_NVS, "nvs");
+  if (!journal_partition || journal_partition->size < 2 * sizeof(cm_journal) + 4 * 4096) {printf("CIBYP Micro: NVS partition must have at least 64 KiB for durable journal updates; use the matching partition table\n"); return;}
   ESP_ERROR_CHECK(nvs_flash_init()); ESP_ERROR_CHECK(nvs_open("cibyp", NVS_READWRITE, &storage));
   ESP_ERROR_CHECK(esp_timer_create(&(esp_timer_create_args_t){.callback = low, .name = "gpio-safe"}, &fail_safe));
   esp_err_t gpio_error = setup_gpio(CONFIG_CIBYP_GPIO);

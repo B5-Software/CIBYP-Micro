@@ -1,0 +1,6 @@
+# Name, Type, SubType, Offset, Size, Flags
+# A complete Wi-Fi/WSS application needs more than the IDF default 1 MiB slot.
+# NVS retains both journal generations during an atomic update plus Wi-Fi state.
+nvs, data, nvs, 0x9000, 0x20000,
+phy_init, data, phy, 0x29000, 0x1000,
+factory, app, factory, 0x30000, 0x1D0000,

@@ -1,0 +1,42 @@
+name: Micro
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  host:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+      - run: cmake --build build --config Debug
+      - run: ctest --test-dir build -C Debug --output-on-failure
+  sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B build -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g"
+      - run: cmake --build build
+      - run: ctest --test-dir build --output-on-failure
+  esp32:
+    runs-on: ubuntu-latest
+    container: espressif/idf:v5.5.1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build reference ESP32-S3 firmware
+        shell: bash
+        run: |
+          . /opt/esp/idf/export.sh
+          cd ports/esp-idf
+          idf.py set-target esp32s3
+          idf.py build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: esp32s3-unsigned-development-firmware
+          path: |
+            ports/esp-idf/build/*.bin
+            ports/esp-idf/build/bootloader/bootloader.bin
+            ports/esp-idf/build/partition_table/partition-table.bin

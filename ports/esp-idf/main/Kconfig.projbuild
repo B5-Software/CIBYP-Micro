@@ -1,0 +1,21 @@
+menu "CIBYP Micro provisioning (development only; protect sdkconfig)"
+config CIBYP_WIFI_SSID
+  string "Wi-Fi SSID"
+  default ""
+config CIBYP_WIFI_PASSWORD
+  string "Wi-Fi password"
+  default ""
+config CIBYP_GATEWAY
+  string "Gateway URL (wss:// with a trusted certificate)"
+  default "wss://example.invalid/remote/v2/devices"
+config CIBYP_DEVICE_ID
+  string "Provisioned device ID"
+  default "esp32-demo"
+config CIBYP_DEVICE_TOKEN
+  string "Provisioned device token (64 lowercase hex characters)"
+  default ""
+config CIBYP_GPIO
+  int "Explicitly granted output GPIO (-1 disables writes)"
+  range -1 48
+  default -1
+endmenu

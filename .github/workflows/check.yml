@@ -50,17 +50,27 @@ jobs:
           set -eo pipefail
           . /opt/esp/idf/export.sh
           cd ports/esp-idf
-          printf 'CONFIG_CIBYP_GPIO=%s\n' "$CIBYP_BUILD_GPIO" > sdkconfig.ci
+          # Keep Wi-Fi/WSS reachable to the linker; empty defaults optimize the whole network path away.
+          cat > sdkconfig.ci <<'EOF'
+          CONFIG_CIBYP_WIFI_SSID="CIBYP-CI-PLACEHOLDER"
+          CONFIG_CIBYP_DEVICE_TOKEN="0000000000000000000000000000000000000000000000000000000000000000"
+          CONFIG_CIBYP_GATEWAY="wss://example.invalid/remote/v2/devices"
+          EOF
+          printf 'CONFIG_CIBYP_GPIO=%s\n' "$CIBYP_BUILD_GPIO" >> sdkconfig.ci
           idf.py --preview -D 'SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.ci' set-target "$CIBYP_BUILD_TARGET"
+          grep -Fx "CONFIG_CIBYP_GPIO=$CIBYP_BUILD_GPIO" sdkconfig
+          grep -Fx 'CONFIG_CIBYP_WIFI_SSID="CIBYP-CI-PLACEHOLDER"' sdkconfig
           idf.py --preview build size
           # Also compile the disabled default; published development artifacts never drive a pin.
           sed -i 's/^CONFIG_CIBYP_GPIO=.*/CONFIG_CIBYP_GPIO=-1/' sdkconfig
           idf.py --preview build size
+          grep -Fx 'CONFIG_CIBYP_GPIO=-1' sdkconfig
           {
-            printf 'target=%s\ngpio=-1\ntested_gpio=%s\n' "$CIBYP_BUILD_TARGET" "$CIBYP_BUILD_GPIO"
+            printf 'target=%s\ngpio=-1\ntested_gpio=%s\nprovisioning=placeholder\n' "$CIBYP_BUILD_TARGET" "$CIBYP_BUILD_GPIO"
             idf.py --version
             git -C "$IDF_PATH" rev-parse HEAD
           } > build/cibyp-build-info.txt
+          (cd build && sha256sum ./*.bin bootloader/bootloader.bin partition_table/partition-table.bin flasher_args.json cibyp-build-info.txt > SHA256SUMS)
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}-unsigned-development-firmware
@@ -70,3 +80,4 @@ jobs:
             ports/esp-idf/build/partition_table/partition-table.bin
             ports/esp-idf/build/flasher_args.json
             ports/esp-idf/build/cibyp-build-info.txt
+            ports/esp-idf/build/SHA256SUMS

@@ -47,7 +47,7 @@ idf.py --preview build
 idf.py --preview -p /dev/ttyUSB0 flash monitor
 ```
 
-When changing chip or SDK, use a fresh build directory and reconfigure provisioning; firmware, sdkconfig and device IDs must match the target. CI pins the S31 official image digest in `.github/workflows/check.yml`, tests both an enabled GPIO and the disabled default, and publishes separate unsigned artifacts with flashing offsets, SDK commit and target metadata. All uploaded firmware leaves GPIO disabled until deliberately configured.
+When changing chip or SDK, use a fresh build directory and reconfigure provisioning; firmware, sdkconfig and device IDs must match the target. CI pins the S31 official image digest in `.github/workflows/check.yml`, tests both an enabled GPIO and the disabled default, and checks the effective configuration. Placeholder provisioning keeps the Wi-Fi/WSS path linked instead of optimized away. Separate unsigned artifacts include flashing offsets, SDK commit, target metadata and `SHA256SUMS` (`sha256sum -c SHA256SUMS` after extraction). Uploaded firmware uses an invalid gateway and placeholder credentials, and leaves GPIO disabled; configure your own provisioning and rebuild to connect a device.
 
 Configure Wi-Fi, **WSS** gateway URL, device ID/token and an explicitly wired safe GPIO under CIBYP. GPIO defaults to disabled. ESP's certificate bundle verifies the server; SNTP establishes a clock before TLS. Local/private CAs need a deliberately provisioned certificate adaptation; disabling certificate/hostname validation is not supported. Menuconfig credentials are a development provisioning path and become part of the firmware; production provisioning must keep them out of source control and use appropriate protected storage.
 
